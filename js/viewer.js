@@ -522,7 +522,7 @@ const Viewer = {
                 const photoMap = (infoRes && infoRes.status === "success") ? infoRes.data : {};
                 const defaultAvatar = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzY0NzQ4YiI+PHBhdGggZD0iTTEyIDEyYzIuMjEgMCA0LTEuNzkgNC00cy0xLjc5LTQtNC00LTQgMS43OS00IDQgMS43OSA0IDQgNHptMCAyYy0yLjY3IDAtOCAxLjM0LTggNHYyaDE2di0yYzAtMi42Ni01LjMzLTQtOC00eiIvPjwvc3ZnPg==";
 
-                const topPlayers = ptsRes.data.slice(0, 60);
+                const topPlayers = ptsRes.data;
                 if (topPlayers.length === 0) {
                     grid.innerHTML = "<div class='card' style='grid-column: 1 / -1; text-align:center;'>尚未執行月結統計，目前暫無資料</div>";
                     return;
