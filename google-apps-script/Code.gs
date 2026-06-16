@@ -123,6 +123,9 @@ function handleRequest(e) {
       case "debugCalc":
         result = { status: "success", data: helperDebugCalc(e.parameter.yearMonth || "2026-06-14") };
         break;
+      case "updateZones":
+        result = logicUpdateRegistrationZones(yearMonth || "2026-06-14");
+        break;
     }
     
     return createResponse(result);
@@ -1730,7 +1733,13 @@ function logicCalculatePoints(yearMonth, manualData) {
       p.totalPts
     ]);
     
-    pSheet.getRange(pSheet.getLastRow() + 1, 1, rowsToAppend.length, rowsToAppend[0].length).setValues(rowsToAppend);
+    const maxCols = pSheet.getMaxColumns();
+    const neededCols = rowsToAppend[0].length;
+    if (maxCols < neededCols) {
+      pSheet.insertColumnsAfter(maxCols, neededCols - maxCols);
+    }
+    
+    pSheet.getRange(pSheet.getLastRow() + 1, 1, rowsToAppend.length, neededCols).setValues(rowsToAppend);
   }
   
   return { 
@@ -2172,4 +2181,68 @@ function logicGenerateLotteryKnockout(yearMonth, customizedData) {
 function cleanPlayerName(name) {
   if (!name) return "";
   return String(name).replace(/\([CA]\)/ig, "").trim();
+}
+
+function logicUpdateRegistrationZones(yearMonth) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.SHEET_REGISTRATION);
+  if (!sheet) return { status: "error", message: "找不到報名紀錄工作表" };
+  
+  const data = sheet.getDataRange().getValues();
+  
+  // 建立球員與其分區的映射 (根據圖片)
+  const zoneMapping = {
+    // 猛禽總部隊
+    "阿伯": "猛禽", "Kobe": "猛禽", "建瑋": "猛禽", "Lily": "猛禽",
+    "彥維": "小鳥", "哈達威": "小鳥", "寶拉": "小鳥", "庭妤": "小鳥",
+    "豚豚": "鳥蛋", "龍龍": "鳥蛋",
+    
+    // 雪精靈隊
+    "子安": "猛禽", "阿俊": "猛禽", "英忠": "猛禽", "鈞家": "猛禽",
+    "Afu": "小鳥", "閃亮亮": "小鳥", "大毛": "小鳥", "薛薛": "小鳥",
+    "杭杭": "鳥蛋", "佳靜": "鳥蛋",
+    
+    // 大哥隊
+    "磊哥": "猛禽", "Jason": "猛禽", "宗霈": "猛禽", "Ken": "猛禽",
+    "世峰": "小鳥", "Sandy": "小鳥", "志軒": "小鳥", "東哥": "小鳥",
+    "鈺茹": "鳥蛋", "盈婷": "鳥蛋",
+    
+    // 燒鳥隊
+    "半熟": "猛禽", "粒米": "猛禽", "靜靜": "猛禽", "文豪": "猛禽", "QQ": "猛禽",
+    "嘉銘": "小鳥", "欣陵": "小鳥", "David": "小鳥", "政瑜": "小鳥",
+    "葉問": "鳥蛋", "Peggy": "鳥蛋"
+  };
+  
+  const ymIdx = data[0].indexOf("年月");
+  const nameIdx = data[0].indexOf("姓名");
+  const areaIdx = data[0].indexOf("區");
+  
+  if (ymIdx === -1 || nameIdx === -1 || areaIdx === -1) {
+    return { status: "error", message: "欄位結構不完整" };
+  }
+  
+  let updatedCount = 0;
+  
+  for (let i = 1; i < data.length; i++) {
+    let rYM = data[i][ymIdx];
+    if (rYM instanceof Date) {
+      rYM = Utilities.formatDate(rYM, CONFIG.TIMEZONE, "yyyy-MM-dd");
+    } else {
+      rYM = String(rYM).trim().substring(0, 10);
+    }
+    
+    // 比對年月
+    const targetYM = String(yearMonth).trim().substring(0, 10);
+    if (rYM === targetYM) {
+      const name = String(data[i][nameIdx]).trim();
+      const cleanName = name.replace(/\([CA]\)/ig, "").trim();
+      
+      if (zoneMapping[cleanName]) {
+        sheet.getRange(i + 1, areaIdx + 1).setValue(zoneMapping[cleanName]);
+        updatedCount++;
+      }
+    }
+  }
+  
+  return { status: "success", message: "成功更新了 " + updatedCount + " 位球員的分區！" };
 }
