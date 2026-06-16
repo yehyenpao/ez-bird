@@ -118,7 +118,7 @@ function handleRequest(e) {
         result = { status: "success", data: logicGetLatestDate() };
         break;
       case "debugSheet":
-        result = { status: "success", data: helperDebugSheet(e.parameter.sheet || CONFIG.SHEET_CHASING) };
+        result = { status: "success", data: helperDebugSheet(e.parameter.sheet || CONFIG.SHEET_CHASING, e.parameter.query || "") };
         break;
     }
     
@@ -199,8 +199,16 @@ function helperGetData(sheetName, yearMonth) {
 /**
  * 診斷用：直接回傳試算表所有原始資料（不篩選年月）
  */
-function helperDebugSheet(sheetName) {
+function helperDebugSheet(sheetName, query) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  if (sheetName === "list") {
+    const sheets = ss.getSheets();
+    return {
+      sheets: sheets.map(s => s.getName())
+    };
+  }
+
   const sheet = ss.getSheetByName(sheetName);
   if (!sheet) return { error: "找不到工作表: " + sheetName };
   
@@ -208,26 +216,27 @@ function helperDebugSheet(sheetName) {
   if (data.length <= 1) return { rowCount: data.length, headers: data[0] || [], rows: [] };
   
   const headers = data[0];
-  const ymIdx = headers.indexOf("年月");
   
-  // 直接回傳前 10 筆原始資料，以便偵錯
-  const rows = data.slice(1, 11).map((row, i) => {
-    const rawYM = row[ymIdx];
-    return {
-      rowNum: i + 2,
-      rawYM: rawYM instanceof Date ? rawYM.toISOString() : String(rawYM),
-      formattedYM: rawYM instanceof Date ? Utilities.formatDate(rawYM, CONFIG.TIMEZONE, "yyyy-MM") : String(rawYM).substring(0, 7),
-      isDate: rawYM instanceof Date,
-      firstFewCols: row.slice(0, 6).map(v => v instanceof Date ? v.toISOString() : v)
-    };
-  });
+  // 找出所有包含指定 query 的行，回傳其整行資料，方便確認欄位對齊狀況
+  const targetQuery = query || "2026-06-14";
+  const matchingRows = [];
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const rowStr = row.map(v => v instanceof Date ? Utilities.formatDate(v, CONFIG.TIMEZONE, "yyyy-MM-dd HH:mm:ss") : String(v)).join(" | ");
+    if (rowStr.includes(targetQuery) || rowStr.includes("2026-05-31")) {
+      matchingRows.push({
+        rowNum: i + 1,
+        content: row.map(v => v instanceof Date ? Utilities.formatDate(v, CONFIG.TIMEZONE, "yyyy-MM-dd HH:mm") : String(v))
+      });
+    }
+  }
   
   return {
     sheetName: sheetName,
     totalRows: data.length - 1,
     headers: headers,
-    ymColumnIndex: ymIdx,
-    debugRows: rows
+    matchingRowsCount: matchingRows.length,
+    matchingRows: matchingRows.slice(0, 100)
   };
 }
 
@@ -1195,13 +1204,15 @@ function logicCalculatePoints(yearMonth, manualData) {
     if (!playersMap[name]) {
       playersMap[name] = { 
         name: name, team: p["隊名"] || "", area: p["區"] || "", 
-        rrRank: "-", elimRank: "-", 
+        rrRank: p["循環名次"] || "-", elimRank: p["淘汰名次"] || "-", 
         currPts: prevBalances[name] || 0, 
         guessPts: 0, refPts: 0, rrPts: 0, elimPts: 0, totalPts: 0 
       };
     } else {
       playersMap[name].team = p["隊名"] || playersMap[name].team;
       playersMap[name].area = p["區"] || playersMap[name].area;
+      if (p["循環名次"]) playersMap[name].rrRank = p["循環名次"];
+      if (p["淘汰名次"]) playersMap[name].elimRank = p["淘汰名次"];
     }
   });
 
@@ -1231,8 +1242,46 @@ function logicCalculatePoints(yearMonth, manualData) {
     });
   }
 
-  // 4. 計算當月循環賽每場得失分
+  // 讀取當月賽程與追分賽紀錄 (用於過濾與自動註冊)
   const rrMatches = helperGetData(CONFIG.SHEET_ROUND_ROBIN, yearMonth);
+  const chasingMatches = helperGetData(CONFIG.SHEET_CHASING, yearMonth);
+
+  // 防呆優化：若外部匯入賽程且無報名名單，自動掃描並建立球員基本資料
+  const autoRegisterPlayer = (pName, teamName, areaName) => {
+    if (pName && pName !== "待定" && !playersMap[pName]) {
+      playersMap[pName] = {
+        name: pName,
+        team: teamName || "",
+        area: areaName || "",
+        rrRank: "-",
+        elimRank: "-",
+        currPts: prevBalances[pName] || 0,
+        guessPts: 0,
+        refPts: 0,
+        rrPts: 0,
+        elimPts: 0,
+        totalPts: 0
+      };
+    }
+  };
+
+  rrMatches.forEach(m => {
+    autoRegisterPlayer(m["A隊員1"], m["A隊名"], m["區"]);
+    autoRegisterPlayer(m["A隊員2"], m["A隊名"], m["區"]);
+    autoRegisterPlayer(m["B隊員1"], m["B隊名"], m["區"]);
+    autoRegisterPlayer(m["B隊員2"], m["B隊名"], m["區"]);
+  });
+
+  chasingMatches.forEach(m => {
+    autoRegisterPlayer(m["A隊員1"], m["A隊名"], m["區"]);
+    autoRegisterPlayer(m["A隊員2"], m["A隊名"], m["區"]);
+    autoRegisterPlayer(m["A隊員3"], m["A隊名"], m["區"]);
+    autoRegisterPlayer(m["B隊員1"], m["B隊名"], m["區"]);
+    autoRegisterPlayer(m["B隊員2"], m["B隊名"], m["區"]);
+    autoRegisterPlayer(m["B隊員3"], m["B隊名"], m["區"]);
+  });
+
+  // 4. 計算當月循環賽每場得失分
   // 動態定義積分表 (包含常規與混合區)
   const areaPoints = {
     "猛禽": { win: 100, lose: 50 }, "猛禽區": { win: 100, lose: 50 },
@@ -1248,31 +1297,78 @@ function logicCalculatePoints(yearMonth, manualData) {
     
     const area = String(m["區"]);
     let ptsCfg = { win: 0, lose: 0 };
+    const isTeamMatch = area.includes("團體");
     
     // 判斷是否為鳥樂賽 (場地關鍵字)
     const isLottery = area.includes("場");
     if (isLottery) {
         ptsCfg = { win: 100, lose: 50 };
+    } else if (area.includes("男雙")) {
+        ptsCfg = { win: 100, lose: 50 };
+    } else if (area.includes("女雙")) {
+        ptsCfg = { win: 50, lose: 25 };
+    } else if (isTeamMatch) {
+        // 團體賽：點數於下方依球員分區動態決定
     } else {
         // 常規區模糊匹配
         const key = Object.keys(areaPoints).find(k => area.includes(k));
         ptsCfg = areaPoints[key] || { win: 0, lose: 0 };
     }
     
-    let aPts = (sA > sB) ? ptsCfg.win : ptsCfg.lose;
-    let bPts = (sB > sA) ? ptsCfg.win : ptsCfg.lose;
-    
     const teamAPlayers = [m["A隊員1"], m["A隊員2"]].filter(p => p && p !== "待定");
     const teamBPlayers = [m["B隊員1"], m["B隊員2"]].filter(p => p && p !== "待定");
 
     teamAPlayers.forEach(p => {
-      if (playersMap[p] && (isLottery || officialTeams.includes(playersMap[p].team))) {
-        playersMap[p].rrPts += aPts;
+      if (playersMap[p]) {
+        let currentPtsCfg = ptsCfg;
+        if (isTeamMatch) {
+          const pArea = String(playersMap[p].area);
+          if (pArea.includes("猛禽")) {
+            currentPtsCfg = { win: 200, lose: 100 };
+          } else if (pArea.includes("鳥蛋")) {
+            currentPtsCfg = { win: 120, lose: 60 };
+          } else {
+            currentPtsCfg = { win: 160, lose: 80 }; // 預設為小鳥
+          }
+        }
+        
+        const isOfficialOrTeamMatch = isLottery || 
+          area.includes("男雙") || 
+          area.includes("女雙") || 
+          officialTeams.includes(playersMap[p].team) ||
+          isTeamMatch;
+          
+        if (isOfficialOrTeamMatch) {
+          const pPts = (sA > sB) ? currentPtsCfg.win : currentPtsCfg.lose;
+          playersMap[p].rrPts += pPts;
+        }
       }
     });
+
     teamBPlayers.forEach(p => {
-      if (playersMap[p] && (isLottery || officialTeams.includes(playersMap[p].team))) {
-        playersMap[p].rrPts += bPts;
+      if (playersMap[p]) {
+        let currentPtsCfg = ptsCfg;
+        if (isTeamMatch) {
+          const pArea = String(playersMap[p].area);
+          if (pArea.includes("猛禽")) {
+            currentPtsCfg = { win: 200, lose: 100 };
+          } else if (pArea.includes("鳥蛋")) {
+            currentPtsCfg = { win: 120, lose: 60 };
+          } else {
+            currentPtsCfg = { win: 160, lose: 80 }; // 預設為小鳥
+          }
+        }
+        
+        const isOfficialOrTeamMatch = isLottery || 
+          area.includes("男雙") || 
+          area.includes("女雙") || 
+          officialTeams.includes(playersMap[p].team) ||
+          isTeamMatch;
+          
+        if (isOfficialOrTeamMatch) {
+          const pPts = (sB > sA) ? currentPtsCfg.win : currentPtsCfg.lose;
+          playersMap[p].rrPts += pPts;
+        }
       }
     });
   });
@@ -1288,7 +1384,6 @@ function logicCalculatePoints(yearMonth, manualData) {
   });
 
   // 5. 計算當月淘汰賽名次給分
-  const chasingMatches = helperGetData(CONFIG.SHEET_CHASING, yearMonth);
   const finals = chasingMatches.filter(m => 
     (String(m["區"]).includes("冠軍賽") || String(m["區"]).includes("季軍賽") || String(m["區"]).includes("56名賽")) && 
     String(m["比賽狀態"]).includes("已完賽")
@@ -1310,9 +1405,11 @@ function logicCalculatePoints(yearMonth, manualData) {
 
   Object.keys(finalRanks).forEach(area => {
     const r = finalRanks[area];
-    const isLottery = area.includes("猛禽") || area.includes("小鳥"); // 特別賽區分
     const isChamp = area.includes("冠軍賽");
     const is56 = area.includes("56名賽");
+
+    // 排除男雙與女雙的標準淘汰給分邏輯 (男雙、女雙採每場勝負點數累計，在下方處理)
+    if (area.includes("男雙") || area.includes("女雙")) return;
 
     if (r.sA > r.sB) {
       if (isChamp) { 
@@ -1339,11 +1436,15 @@ function logicCalculatePoints(yearMonth, manualData) {
     }
   });
 
-  // 分配積分至所有隊員
+  // 分配積分至所有隊員 (僅常規與特別賽)
   chasingMatches.forEach(m => {
     const tA = m["A隊名"]; const tB = m["B隊名"];
     const isLotteryMatch = String(m["區"]).includes("猛禽") || String(m["區"]).includes("小鳥");
+    const area = String(m["區"]);
     
+    // 排除男雙與女雙，由下方特別計分處理
+    if (area.includes("男雙") || area.includes("女雙")) return;
+
     [tA, tB].forEach(team => {
       if (elimPointsMapping[team]) {
         const prefix = (team === tA) ? "A隊員" : "B隊員";
@@ -1358,6 +1459,79 @@ function logicCalculatePoints(yearMonth, manualData) {
         });
       }
     });
+  });
+
+  // 5.1 針對「男雙」與「女雙」的追分賽/決賽進行每場勝負分累加
+  chasingMatches.forEach(m => {
+    const area = String(m["區"]);
+    if (area.includes("男雙") || area.includes("女雙")) {
+      const sA = parseInt(m["A隊比分"]) || 0;
+      const sB = parseInt(m["B隊比分"]) || 0;
+      if (sA === 0 && sB === 0) return;
+      
+      let ptsCfg = { win: 0, lose: 0 };
+      if (area.includes("男雙")) {
+        ptsCfg = { win: 100, lose: 50 };
+      } else if (area.includes("女雙")) {
+        ptsCfg = { win: 50, lose: 25 };
+      }
+      
+      const aPts = (sA > sB) ? ptsCfg.win : ptsCfg.lose;
+      const bPts = (sB > sA) ? ptsCfg.win : ptsCfg.lose;
+      
+      const teamAPlayers = [m["A隊員1"], m["A隊員2"], m["A隊員3"]].filter(p => p && p !== "待定");
+      const teamBPlayers = [m["B隊員1"], m["B隊員2"], m["B隊員3"]].filter(p => p && p !== "待定");
+      
+      teamAPlayers.forEach(p => {
+        if (playersMap[p]) {
+          playersMap[p].elimPts += aPts;
+          if (area.includes("冠軍賽")) {
+            playersMap[p].elimRank = (sA > sB) ? "冠軍" : "亞軍";
+          } else if (area.includes("季軍賽")) {
+            playersMap[p].elimRank = (sA > sB) ? "季軍" : "殿軍";
+          } else if (area.includes("56名賽")) {
+            playersMap[p].elimRank = (sA > sB) ? "第五名" : "第六名";
+          }
+        }
+      });
+      
+      teamBPlayers.forEach(p => {
+        if (playersMap[p]) {
+          playersMap[p].elimPts += bPts;
+          if (area.includes("冠軍賽")) {
+            playersMap[p].elimRank = (sB > sA) ? "冠軍" : "亞軍";
+          } else if (area.includes("季軍賽")) {
+            playersMap[p].elimRank = (sB > sA) ? "季軍" : "殿軍";
+          } else if (area.includes("56名賽")) {
+            playersMap[p].elimRank = (sB > sA) ? "第五名" : "第六名";
+          }
+        }
+      });
+    }
+  });
+
+  // 5.2 針對團體賽，直接從報名表的「淘汰名次」給予淘汰分
+  Object.keys(playersMap).forEach(name => {
+    const p = playersMap[name];
+    const isTeamPlayer = p.area && (p.area.includes("團體") || 
+      ["猛禽總部隊", "大哥隊", "雪精靈隊", "燒鳥隊", "寒冬防守", "炎夏爆擊", "春風快攻", "秋風控場"].includes(p.team));
+    
+    if (isTeamPlayer) {
+      const rank = String(p.elimRank || "").trim();
+      if (rank === "1" || rank === "冠軍") {
+        p.elimPts = 400;
+        p.elimRank = "冠軍";
+      } else if (rank === "2" || rank === "亞軍") {
+        p.elimPts = 350;
+        p.elimRank = "亞軍";
+      } else if (rank === "3" || rank === "季軍") {
+        p.elimPts = 300;
+        p.elimRank = "季軍";
+      } else if (rank === "4" || rank === "殿軍") {
+        p.elimPts = 250;
+        p.elimRank = "殿軍";
+      }
+    }
   });
 
   // 6. 加總並排序結果陣列
