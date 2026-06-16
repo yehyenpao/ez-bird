@@ -1412,19 +1412,19 @@ function logicCalculatePoints(yearMonth, manualData) {
   };
 
   rrMatches.forEach(m => {
-    autoRegisterPlayer(m["A隊員1"], m["A隊名"], m["區"]);
-    autoRegisterPlayer(m["A隊員2"], m["A隊名"], m["區"]);
-    autoRegisterPlayer(m["B隊員1"], m["B隊名"], m["區"]);
-    autoRegisterPlayer(m["B隊員2"], m["B隊名"], m["區"]);
+    autoRegisterPlayer(cleanPlayerName(m["A隊員1"]), m["A隊名"], m["區"]);
+    autoRegisterPlayer(cleanPlayerName(m["A隊員2"]), m["A隊名"], m["區"]);
+    autoRegisterPlayer(cleanPlayerName(m["B隊員1"]), m["B隊名"], m["區"]);
+    autoRegisterPlayer(cleanPlayerName(m["B隊員2"]), m["B隊名"], m["區"]);
   });
 
   chasingMatches.forEach(m => {
-    autoRegisterPlayer(m["A隊員1"], m["A隊名"], m["區"]);
-    autoRegisterPlayer(m["A隊員2"], m["A隊名"], m["區"]);
-    autoRegisterPlayer(m["A隊員3"], m["A隊名"], m["區"]);
-    autoRegisterPlayer(m["B隊員1"], m["B隊名"], m["區"]);
-    autoRegisterPlayer(m["B隊員2"], m["B隊名"], m["區"]);
-    autoRegisterPlayer(m["B隊員3"], m["B隊名"], m["區"]);
+    autoRegisterPlayer(cleanPlayerName(m["A隊員1"]), m["A隊名"], m["區"]);
+    autoRegisterPlayer(cleanPlayerName(m["A隊員2"]), m["A隊名"], m["區"]);
+    autoRegisterPlayer(cleanPlayerName(m["A隊員3"]), m["A隊名"], m["區"]);
+    autoRegisterPlayer(cleanPlayerName(m["B隊員1"]), m["B隊名"], m["區"]);
+    autoRegisterPlayer(cleanPlayerName(m["B隊員2"]), m["B隊名"], m["區"]);
+    autoRegisterPlayer(cleanPlayerName(m["B隊員3"]), m["B隊名"], m["區"]);
   });
 
   // 4. 計算當月循環賽每場得失分
@@ -1461,8 +1461,8 @@ function logicCalculatePoints(yearMonth, manualData) {
         ptsCfg = areaPoints[key] || { win: 0, lose: 0 };
     }
     
-    const teamAPlayers = [m["A隊員1"], m["A隊員2"]].filter(p => p && p !== "待定");
-    const teamBPlayers = [m["B隊員1"], m["B隊員2"]].filter(p => p && p !== "待定");
+    const teamAPlayers = [m["A隊員1"], m["A隊員2"]].map(cleanPlayerName).filter(p => p && p !== "待定");
+    const teamBPlayers = [m["B隊員1"], m["B隊員2"]].map(cleanPlayerName).filter(p => p && p !== "待定");
 
     teamAPlayers.forEach(p => {
       if (playersMap[p]) {
@@ -1595,7 +1595,7 @@ function logicCalculatePoints(yearMonth, manualData) {
       if (elimPointsMapping[team]) {
         const prefix = (team === tA) ? "A隊員" : "B隊員";
         [1, 2, 3].forEach(num => {
-          const pName = m[prefix + num];
+          const pName = cleanPlayerName(m[prefix + num]);
           if (pName && pName !== "待定" && playersMap[pName]) {
             if (isLotteryMatch || officialTeams.includes(playersMap[pName].team)) {
                 playersMap[pName].elimPts = elimPointsMapping[team];
@@ -1625,8 +1625,8 @@ function logicCalculatePoints(yearMonth, manualData) {
       const aPts = (sA > sB) ? ptsCfg.win : ptsCfg.lose;
       const bPts = (sB > sA) ? ptsCfg.win : ptsCfg.lose;
       
-      const teamAPlayers = [m["A隊員1"], m["A隊員2"], m["A隊員3"]].filter(p => p && p !== "待定");
-      const teamBPlayers = [m["B隊員1"], m["B隊員2"], m["B隊員3"]].filter(p => p && p !== "待定");
+      const teamAPlayers = [m["A隊員1"], m["A隊員2"], m["A隊員3"]].map(cleanPlayerName).filter(p => p && p !== "待定");
+      const teamBPlayers = [m["B隊員1"], m["B隊員2"], m["B隊員3"]].map(cleanPlayerName).filter(p => p && p !== "待定");
       
       teamAPlayers.forEach(p => {
         if (playersMap[p]) {
@@ -2167,4 +2167,9 @@ function logicGenerateLotteryKnockout(yearMonth, customizedData) {
 
 
   return { status: "success" };
+}
+
+function cleanPlayerName(name) {
+  if (!name) return "";
+  return String(name).replace(/\([CA]\)/ig, "").trim();
 }
