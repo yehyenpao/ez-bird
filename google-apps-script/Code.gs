@@ -120,6 +120,9 @@ function handleRequest(e) {
       case "debugSheet":
         result = { status: "success", data: helperDebugSheet(e.parameter.sheet || CONFIG.SHEET_CHASING, e.parameter.query || "") };
         break;
+      case "debugCalc":
+        result = { status: "success", data: helperDebugCalc(e.parameter.yearMonth || "2026-06-14") };
+        break;
     }
     
     return createResponse(result);
@@ -238,6 +241,149 @@ function helperDebugSheet(sheetName, query) {
     matchingRowsCount: matchingRows.length,
     matchingRows: matchingRows.slice(0, 100)
   };
+}
+
+function helperDebugCalc(yearMonth) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const log = [];
+  
+  log.push("Starting debugCalc for " + yearMonth);
+  
+  // 1. prevBalances
+  const prevBalances = {};
+  let pSheet = ss.getSheetByName(CONFIG.SHEET_POINTS);
+  if (pSheet) {
+    const pData = pSheet.getDataRange().getValues();
+    log.push("pSheet total rows: " + pData.length);
+    
+    const targetDate = new Date(yearMonth);
+    let latestPrevDate = null;
+    let latestPrevDateStr = "";
+    
+    for (let i = 1; i < pData.length; i++) {
+      let rowDate = pData[i][0]; // 年月
+      if (!(rowDate instanceof Date)) rowDate = new Date(rowDate);
+      if (rowDate < targetDate) {
+        if (!latestPrevDate || rowDate > latestPrevDate) {
+          latestPrevDate = rowDate;
+          latestPrevDateStr = Utilities.formatDate(rowDate, CONFIG.TIMEZONE, "yyyy-MM-dd");
+        }
+      }
+    }
+    log.push("latestPrevDateStr: " + latestPrevDateStr);
+    if (latestPrevDateStr) {
+      for (let i = 1; i < pData.length; i++) {
+        let rowDate = pData[i][0];
+        const rowDateStr = rowDate instanceof Date ? 
+          Utilities.formatDate(rowDate, CONFIG.TIMEZONE, "yyyy-MM-dd") : String(rowDate).substring(0, 10);
+        if (rowDateStr === latestPrevDateStr) {
+          prevBalances[pData[i][2]] = parseInt(pData[i][12]) || 0; // 姓名, 累積積點
+        }
+      }
+    }
+  }
+  log.push("prevBalances['子安']: " + prevBalances["子安"]);
+  
+  // 2. currReg
+  const currReg = helperGetData(CONFIG.SHEET_REGISTRATION, yearMonth);
+  log.push("currReg count: " + currReg.length);
+  const testPlayer = "子安";
+  const pReg = currReg.find(p => p["姓名"] === testPlayer);
+  log.push("pReg for " + testPlayer + ": " + JSON.stringify(pReg));
+  
+  // 3. Initialize playersMap
+  const playersMap = {};
+  Object.keys(prevBalances).forEach(name => {
+    playersMap[name] = { 
+      name: name, team: "", area: "", 
+      rrRank: "-", elimRank: "-", 
+      currPts: prevBalances[name], 
+      guessPts: 0, refPts: 0, rrPts: 0, elimPts: 0, totalPts: 0 
+    };
+  });
+  
+  currReg.forEach(p => {
+    const name = p["姓名"];
+    if (!playersMap[name]) {
+      playersMap[name] = { 
+        name: name, team: p["隊名"] || "", area: p["區"] || "", 
+        rrRank: p["循環名次"] || "-", elimRank: p["淘汰名次"] || "-", 
+        currPts: prevBalances[name] || 0, 
+        guessPts: 0, refPts: 0, rrPts: 0, elimPts: 0, totalPts: 0 
+      };
+    } else {
+      playersMap[name].team = p["隊名"] || playersMap[name].team;
+      playersMap[name].area = p["區"] || playersMap[name].area;
+      if (p["循環名次"]) playersMap[name].rrRank = p["循環名次"];
+      if (p["淘汰名次"]) playersMap[name].elimRank = p["淘汰名次"];
+    }
+  });
+  
+  log.push("playersMap['" + testPlayer + "'] after currReg: " + JSON.stringify(playersMap[testPlayer]));
+  
+  // 4. rrMatches
+  const rrMatches = helperGetData(CONFIG.SHEET_ROUND_ROBIN, yearMonth);
+  log.push("rrMatches count: " + rrMatches.length);
+  
+  rrMatches.forEach((m, idx) => {
+    const isA = (m["A隊員1"] === testPlayer || m["A隊員2"] === testPlayer);
+    const isB = (m["B隊員1"] === testPlayer || m["B隊員2"] === testPlayer);
+    if (isA || isB) {
+      log.push("Match " + idx + " involves " + testPlayer + ": " + JSON.stringify(m));
+      const sA = parseInt(m["A隊比分"]) || 0;
+      const sB = parseInt(m["B隊比分"]) || 0;
+      const area = String(m["區"]);
+      const isTeamMatch = area.includes("團體");
+      log.push("  isTeamMatch: " + isTeamMatch + ", area: " + area);
+      
+      let ptsCfg = { win: 0, lose: 0 };
+      if (isTeamMatch) {
+        const pArea = String(playersMap[testPlayer].area);
+        log.push("  pArea: " + pArea);
+        if (pArea.includes("猛禽")) {
+          ptsCfg = { win: 200, lose: 100 };
+        } else if (pArea.includes("鳥蛋")) {
+          ptsCfg = { win: 120, lose: 60 };
+        } else {
+          ptsCfg = { win: 160, lose: 80 };
+        }
+      }
+      log.push("  ptsCfg: " + JSON.stringify(ptsCfg));
+      
+      const officialTeams = ["藍鳥隊", "黑鳥隊", "青鳥隊", "粉鳥隊"];
+      const isOfficialOrTeamMatch = area.includes("男雙") || 
+        area.includes("女雙") || 
+        officialTeams.includes(playersMap[testPlayer].team) ||
+        isTeamMatch;
+        
+      log.push("  isOfficialOrTeamMatch: " + isOfficialOrTeamMatch);
+      if (isOfficialOrTeamMatch) {
+        const win = isA ? (sA > sB) : (sB > sA);
+        const pPts = win ? ptsCfg.win : ptsCfg.lose;
+        log.push("  win: " + win + ", adding points: " + pPts);
+        playersMap[testPlayer].rrPts += pPts;
+      }
+    }
+  });
+  
+  log.push("playersMap['" + testPlayer + "'] rrPts final: " + playersMap[testPlayer].rrPts);
+  
+  // 5. elimination pts trace
+  const rank = String(playersMap[testPlayer].elimRank || "").trim();
+  log.push("testPlayer elimRank: " + rank);
+  let elimPts = 0;
+  if (rank === "1" || rank === "冠軍") {
+    elimPts = 400;
+  } else if (rank === "2" || rank === "亞軍") {
+    elimPts = 350;
+  } else if (rank === "3" || rank === "季軍") {
+    elimPts = 300;
+  } else if (rank === "4" || rank === "殿軍") {
+    elimPts = 250;
+  }
+  log.push("testPlayer elimPts calculated: " + elimPts);
+  
+  return log;
 }
 
 /**
