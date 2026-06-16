@@ -126,6 +126,9 @@ function handleRequest(e) {
       case "updateZones":
         result = logicUpdateRegistrationZones(yearMonth || "2026-06-14");
         break;
+      case "updateRanks":
+        result = logicUpdateRegistrationRanks(yearMonth || "2026-06-14");
+        break;
     }
     
     return createResponse(result);
@@ -2245,4 +2248,49 @@ function logicUpdateRegistrationZones(yearMonth) {
   }
   
   return { status: "success", message: "成功更新了 " + updatedCount + " 位球員的分區！" };
+}
+
+function logicUpdateRegistrationRanks(yearMonth) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.SHEET_REGISTRATION);
+  if (!sheet) return { status: "error", message: "找不到報名紀錄工作表" };
+  
+  const data = sheet.getDataRange().getValues();
+  
+  const rankMapping = {
+    "雪精靈隊": 1,
+    "燒鳥隊": 2,
+    "猛禽總部隊": 3,
+    "大哥隊": 4
+  };
+  
+  const ymIdx = data[0].indexOf("年月");
+  const teamIdx = data[0].indexOf("隊名");
+  const elimIdx = data[0].indexOf("淘汰名次");
+  
+  if (ymIdx === -1 || teamIdx === -1 || elimIdx === -1) {
+    return { status: "error", message: "欄位結構不完整" };
+  }
+  
+  let updatedCount = 0;
+  
+  for (let i = 1; i < data.length; i++) {
+    let rYM = data[i][ymIdx];
+    if (rYM instanceof Date) {
+      rYM = Utilities.formatDate(rYM, CONFIG.TIMEZONE, "yyyy-MM-dd");
+    } else {
+      rYM = String(rYM).trim().substring(0, 10);
+    }
+    
+    const targetYM = String(yearMonth).trim().substring(0, 10);
+    if (rYM === targetYM) {
+      const team = String(data[i][teamIdx]).trim();
+      if (rankMapping[team] !== undefined) {
+        sheet.getRange(i + 1, elimIdx + 1).setValue(rankMapping[team]);
+        updatedCount++;
+      }
+    }
+  }
+  
+  return { status: "success", message: "成功更新了 " + updatedCount + " 位球員的淘汰名次！" };
 }
