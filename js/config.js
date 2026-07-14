@@ -1,6 +1,6 @@
 const CONFIG = {
     // 請在此更換為您部署後的 Google Apps Script Web App URL
-    API_URL: "https://script.google.com/macros/s/AKfycbzRqDRx7Gd4VJ1zYHXKGpILyzFFojhq7Ls9EGGHH7t_M23QOVxUNJuGyX46NXOuzBU33Q/exec",
+    API_URL: "https://script.google.com/macros/s/AKfycbylJdE0zrBJkgbjkvXKKCbhQYs2wnrHCTMutJueWPRISeiUcAuQNYBf-Mg5X9-1GEKZ0w/exec",
 
     // 目前預設日期 (用於篩選資料)
     DEFAULT_DATE: new Date().toLocaleDateString('sv'), // yyyy-mm-dd

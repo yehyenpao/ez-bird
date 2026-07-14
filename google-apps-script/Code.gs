@@ -1530,7 +1530,14 @@ function logicCalculatePoints(yearMonth, manualData) {
   const cleanTeamName = (value) => String(value || "").replace(/\s+/g, "").trim();
   Object.keys(playersMap).forEach(name => {
     const teamKey = cleanTeamName(playersMap[name].team);
-    if (teamKey && rrRankLookup[teamKey]) {
+    
+    // 如果是團體賽，優先保留報名表中已填寫的循環名次 (避免與其他系統轉入的官方名次衝突)
+    const isTeamPlayer = playersMap[name].area && (playersMap[name].area.includes("團體") || 
+      ["猛禽總部隊", "大哥隊", "雪精靈隊", "燒鳥隊", "寒冬防守", "炎夏爆擊", "春風快攻", "秋風控場"].includes(playersMap[name].team));
+      
+    if (isTeamPlayer && playersMap[name].rrRank && playersMap[name].rrRank !== "-" && playersMap[name].rrRank !== "") {
+      // 保留報名表已填寫的名次
+    } else if (teamKey && rrRankLookup[teamKey]) {
       playersMap[name].rrRank = rrRankLookup[teamKey];
     }
   });
